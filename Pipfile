@@ -9,6 +9,8 @@ torch = "*"
 torchvision = "*"
 ultralytics = "*"
 yt-dlp = "*"
+dacite = "*"
+pandas = "*"
 
 [dev-packages]
 

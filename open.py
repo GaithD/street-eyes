@@ -1,7 +1,13 @@
+import json
+from dataclasses import asdict
+from itertools import combinations
+
 import cv2
+import pandas as pd
 import requests
 from io import BytesIO
 from PIL import Image
+from scipy.spatial.distance import euclidean
 from ultralytics import YOLO
 import time
 import numpy as np
@@ -9,7 +15,7 @@ import csv
 import subprocess
 import math
 
-from models import ObjectType, CameraData, RecordsByTime, AllCamerasData
+from models import ObjectType, CameraData, RecordsByTime, load_data
 
 # Load the pre-trained YOLOv8 model
 model = YOLO('yolov8x.pt')  # Use pre-trained YOLOv8 model
@@ -50,18 +56,46 @@ def fetch_image(url):
     return None
 
 
-def get_all_objects(frame, types=[ObjectType.PERSON.value, ObjectType.CAR.value], cof=0.1, iou=0.01):
+def get_all_objects(frame, known_parking, types=[ObjectType.PERSON.value, ObjectType.CAR.value], cof=0.25,
+                    iou=0.45) -> CameraData:
     """Detect and count people, and draw bounding boxes around them."""
-    results = model(frame, conf=cof, iou=iou)  # Run detection on the frame
+    results = model(frame, conf=cof, iou=iou, device='mps')  # Run detection on the frame
     # Loop over all detected boxes and count those that correspond to "person"
     camera_data = CameraData()
     start_time = int(time.time())
+
+    color = (0, 0, 255)
+    radius = 5
+    thickness = 1
+
+    xyxy_ce = known_parking.get('xyxy')
+    max_height = 41
+    for xc, yc in known_parking.get('list'):
+        cv2.circle(frame, (int(xc), int(yc)), radius, (0, 255, 0), 1)
+        cent_xyxy = xyxy_ce[str(xc) + str(yc)]
+        print(cent_xyxy)
+        width = cent_xyxy[2] - cent_xyxy[0]
+        height = cent_xyxy[3] - cent_xyxy[1]
+    #
+    #     scaling = round(height / 41, 2)
+    #     print(f"scaling {scaling}")
+    #     # print(f"width {width}")
+    #     # print(f"height {height}")
+    #     cv2.rectangle(frame, (cent_xyxy[0], cent_xyxy[1]), (cent_xyxy[2], cent_xyxy[3]), color, 1)
+    #     cv2.putText(frame, f'{int(height * scaling)}', (cent_xyxy[0], int(cent_xyxy[1] * scaling)),
+    #                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0),
+    #                 2)
+    #     cv2.putText(frame, f'{int(yc)}', (cent_xyxy[0] - 20, int(cent_xyxy[1] - 10)),
+    #                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1)
+
+    # print(max_height)
     for result in results[0].boxes:
         if result.cls in types:  # Class 0 corresponds to "person" in COCO dataset
             object_type = ObjectType.CAR.value if result.cls == ObjectType.CAR.value else ObjectType.PERSON.value
             # # Get the bounding box coordinates (x1, y1, x2, y2)
+            # print(result)
             x1, y1, x2, y2 = result.xyxy[0].cpu().numpy().astype(int)
-            object_coordinates = [x1, y1, x2, y2]
+            object_coordinates = [int(x1), int(y1), int(x2), int(y2)]
 
             record_time = RecordsByTime(time=start_time, xyxy=object_coordinates)
             if object_type == 0:
@@ -69,69 +103,47 @@ def get_all_objects(frame, types=[ObjectType.PERSON.value, ObjectType.CAR.value]
             elif object_type == 2:
                 camera_data.cars.recordsByTime.append(record_time)
 
+            # founds = False
+            # for parking in known_parking.get('list'):
+            #     distance = euclidean((xc, yc), parking)
+            #     if distance <= 15:
+            #         founds = True
+            #         print(f"Breaking inner loop and skipping outer iteration. {(xc, yc)}")
+            #         break
+            # #
+            # if not founds:
+            #     color = (0, 0, 255)
+            #     radius = 5
+            #     thickness = 1
+            #     # Draw a rectangle around the person
+            #     cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 1)  # Green box, thickness 2
+
             # Draw a rectangle around the person
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)  # Green box, thickness 2
+            # cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 1)  # Green box, thickness 2
 
             # Add a label with the word 'Person' and the count
-            cv2.putText(frame, f'{object_type}', (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
-    print(camera_data)
+            # cv2.putText(frame, f'{object_type}', (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
     return camera_data
 
 
-def count_people(camera_data):
-    return len(camera_data.people.recordsByTime)
+def get_camera_data(camera_name, camera_id, image_url, known_parking) -> CameraData:
+    frame = fetch_image(image_url)
+    if frame is not None:
+        camera_data = get_all_objects(frame, known_parking)
+        camera_data.calculate_metrics()
 
-
-def count_cars(camera_data, frame):
-    # none_stationary = remove_stationary_cars(all_time_cars, all_objects[ObjectType.CAR.value], frame)
-    return len(camera_data.cars.recordsByTime)
-
-
-def remove_stationary_cars(all_time_cars, all_objects, frame):
-    times = np.array(list(all_time_cars.keys()))
-    print("timesss")
-    print(times)
-    time_now = time.time()
-    objects_60s_old = times[time_now - times > 60]
-
-    none_stationary = []
-    for new_object in all_objects:
-        new_object_times_found = 0
-        for object_60s in objects_60s_old:
-            if new_object_times_found > 5:
-                break
-            time_objects = all_time_cars.get(object_60s)
-            for time_object in time_objects:
-                if new_object_times_found > 5:
-                    # print("exitttttttt")
-                    break
-                # print("new_object")
-                # print(new_object)
-                euclidean_dist = euclidean_distance(time_object, new_object)
-                if euclidean_dist < 3:
-                    new_object_times_found += 1
-                    # print("#########################")
-                    # print("found")
-                    break
-        if new_object_times_found == 0:
-            x1 = new_object[0]
-            y1 = new_object[1]
-            x2 = new_object[2]
-            y2 = new_object[3]
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)  # Green box, thickness 2
-
-            # Add a label with the word 'Person' and the count
-            cv2.putText(frame, f'car', (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
-            none_stationary.append(new_object)
-
-    print("none_stationary")
-    print(none_stationary)
-    return none_stationary
+        people_count = camera_data.people.calculate_objects()
+        cars_count = camera_data.cars.calculate_objects()
+        cv2.imshow(f"People Counting", frame)
+        cv2.waitKey(0)
+        # print(f"{people_count} persons and {cars_count} cars at {camera_name}")
+        return camera_data
 
 
 def run_count():
     # Loop to fetch and process the latest image every few seconds
-    all_cameras = []
+    all_cameras = load_json_data()
+
     while True:
         cameras = get_all_cameras()
         all_people_count = 0
@@ -139,66 +151,88 @@ def run_count():
         # Format: [x1, y1, x2, y2]
         # all_cameras = []
         for camera in cameras:
-            image_url = camera['imageUrl']
+            camera_name = camera['name']
             camera_id = camera['id']
-            # image_url = 'https://webcams.nyctmc.org/api/cameras/75a7b81a-6233-47bf-8428-ea6c9edec1f8/image'
-            frame = fetch_image(image_url)
-            if frame is not None:
-                # Count the people and draw bounding boxes
+            camera_url = camera['imageUrl']
+            print(camera_name)
+            known_parking = []
+            if all_cameras and all_cameras[camera_id]:
+                known_parking = all_cameras[camera_id].cars.knownParking
+                if known_parking:
+                    known_parking = known_parking
+            camera_data = get_camera_data(camera_name, camera_id, camera_url, known_parking)
+            if camera_data:
+                if camera_id in all_cameras:
+                    all_cameras[camera_id].people.recordsByTime.extend(camera_data.people.recordsByTime)
+                    all_cameras[camera_id].cars.recordsByTime.extend(camera_data.cars.recordsByTime)
+                else:
+                    all_cameras[camera_id] = camera_data
 
-                camera_data = get_all_objects(frame)
-                print("##################### Camera")
-                print(camera_data)
-                start_time = time.time()
+            # print(image_url)
+            # print(people_count)
+            # all_people_count += people_count
+            # cv2.destroyAllWindows()
+            # Display the count of people on the image
+            # cv2.putText(frame, f"People Count: {cars_count}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0),2)
 
-                people_count = count_people(camera_data)
-                cars_count = count_cars(camera_data, frame)
+            # Show the image with bounding boxes and count
 
-                all_cameras.append(AllCamerasData(id=camera_id, data=camera_data))
-
-                print(f"{people_count} persons and {cars_count} cars at {camera['name']}")
-
-                # print(image_url)
-                # print(people_count)
-                # all_people_count += people_count
-                # cv2.destroyAllWindows()
-                # Display the count of people on the image
-                # cv2.putText(frame, f"People Count: {cars_count}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0),2)
-
-                # Show the image with bounding boxes and count
-                # cv2.imshow(f"People Counting {camera['area']} ", frame)
-                # cv2.waitKey(0)
-
-            # Wait a bit before fetching the next image (adjust as needed)
-
-            # Break on 'q' key press
         # time.sleep(5)
-        print("###########ALL")
 
-        merged_dict = {obj.id: obj.to_dict() for obj in all_cameras}
-        print(merged_dict)
-        live_stream_count = count_all_live_stream()
-        all_people_count += live_stream_count
+        # live_stream_count = count_all_live_stream()
+        # all_people_count += live_stream_count
 
         print("########################### people in manhattan")
-        print(all_people_count)
-        save_log(all_people_count)
+        # print(all_people_count)
+
+        save_json(all_cameras)
         cv2.destroyAllWindows()
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
 
-def save_log(all_people_count):
-    # Data to append
-    start_time = time.time()
-    data = [[start_time, all_people_count]]
+def load_json_data():
+    import json
+    # Open and load the JSON file
+    data = {}
+    with open("data.json", "r") as file:
+        try:
+            data = json.load(file)
+            if data:
+                loaded = load_data(data)
+                data = loaded.AllData if loaded and hasattr(loaded, "AllData") else {}
+        except Exception as e:
+            print(f"Error: {e}")
+    return data
 
-    # Open the CSV file in append mode
-    with open('data.csv', 'a', newline='') as csvfile:
-        writer = csv.writer(csvfile)
 
-        # Append the data
-        writer.writerows(data)
+def read_json_data():
+    import json
+    # Open and load the JSON file
+    data = {}
+    with open("data.json", "r") as file:
+        try:
+            data = json.load(file)
+        except Exception as e:
+            print(f"Error: {e}")
+    return data
+
+
+# def detect_parking(records, time_frame):
+
+
+def create_json(file_name="data.json"):
+    try:
+        with open(file_name, 'x') as file:
+            pass  # Do nothing; this leaves the file empty
+    except FileExistsError:
+        print("File already exists!")
+
+
+def save_json(all_data):
+    with open("data.json", "w") as file:
+        all_data = {key: data.to_dict() for key, data in all_data.items()}
+        json.dump(all_data, file)
 
 
 # live stream
@@ -227,7 +261,6 @@ def count_stream(video_url):
         # #
         # # # Show the image with bounding boxes and count
         #
-
 
         # print(on_video)
         # key = cv2.waitKey(1) & 0xFF
