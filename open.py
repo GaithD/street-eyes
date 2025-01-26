@@ -134,8 +134,8 @@ def get_camera_data(camera_name, camera_id, image_url, known_parking) -> CameraD
 
         people_count = camera_data.people.calculate_objects()
         cars_count = camera_data.cars.calculate_objects()
-        cv2.imshow(f"People Counting", frame)
-        cv2.waitKey(0)
+        # cv2.imshow(f"People Counting", frame)
+        # cv2.waitKey(0)
         # print(f"{people_count} persons and {cars_count} cars at {camera_name}")
         return camera_data
 
