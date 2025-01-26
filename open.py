@@ -56,7 +56,7 @@ def fetch_image(url):
     return None
 
 
-def get_all_objects(frame, known_parking, types=[ObjectType.PERSON.value, ObjectType.CAR.value], cof=0.25,
+def get_all_objects(frame, types=[ObjectType.PERSON.value, ObjectType.CAR.value], cof=0.25,
                     iou=0.45) -> CameraData:
     """Detect and count people, and draw bounding boxes around them."""
     results = model(frame, conf=cof, iou=iou, device='mps')  # Run detection on the frame
@@ -64,31 +64,6 @@ def get_all_objects(frame, known_parking, types=[ObjectType.PERSON.value, Object
     camera_data = CameraData()
     start_time = int(time.time())
 
-    color = (0, 0, 255)
-    radius = 5
-    thickness = 1
-
-    xyxy_ce = known_parking.get('xyxy')
-    max_height = 41
-    for xc, yc in known_parking.get('list'):
-        cv2.circle(frame, (int(xc), int(yc)), radius, (0, 255, 0), 1)
-        cent_xyxy = xyxy_ce[str(xc) + str(yc)]
-        print(cent_xyxy)
-        width = cent_xyxy[2] - cent_xyxy[0]
-        height = cent_xyxy[3] - cent_xyxy[1]
-    #
-    #     scaling = round(height / 41, 2)
-    #     print(f"scaling {scaling}")
-    #     # print(f"width {width}")
-    #     # print(f"height {height}")
-    #     cv2.rectangle(frame, (cent_xyxy[0], cent_xyxy[1]), (cent_xyxy[2], cent_xyxy[3]), color, 1)
-    #     cv2.putText(frame, f'{int(height * scaling)}', (cent_xyxy[0], int(cent_xyxy[1] * scaling)),
-    #                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0),
-    #                 2)
-    #     cv2.putText(frame, f'{int(yc)}', (cent_xyxy[0] - 20, int(cent_xyxy[1] - 10)),
-    #                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1)
-
-    # print(max_height)
     for result in results[0].boxes:
         if result.cls in types:  # Class 0 corresponds to "person" in COCO dataset
             object_type = ObjectType.CAR.value if result.cls == ObjectType.CAR.value else ObjectType.PERSON.value
@@ -103,33 +78,13 @@ def get_all_objects(frame, known_parking, types=[ObjectType.PERSON.value, Object
             elif object_type == 2:
                 camera_data.cars.recordsByTime.append(record_time)
 
-            # founds = False
-            # for parking in known_parking.get('list'):
-            #     distance = euclidean((xc, yc), parking)
-            #     if distance <= 15:
-            #         founds = True
-            #         print(f"Breaking inner loop and skipping outer iteration. {(xc, yc)}")
-            #         break
-            # #
-            # if not founds:
-            #     color = (0, 0, 255)
-            #     radius = 5
-            #     thickness = 1
-            #     # Draw a rectangle around the person
-            #     cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 1)  # Green box, thickness 2
-
-            # Draw a rectangle around the person
-            # cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 1)  # Green box, thickness 2
-
-            # Add a label with the word 'Person' and the count
-            # cv2.putText(frame, f'{object_type}', (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
     return camera_data
 
 
-def get_camera_data(camera_name, camera_id, image_url, known_parking) -> CameraData:
+def get_camera_data(camera_name, camera_id, image_url) -> CameraData:
     frame = fetch_image(image_url)
     if frame is not None:
-        camera_data = get_all_objects(frame, known_parking)
+        camera_data = get_all_objects(frame)
         camera_data.calculate_metrics()
 
         people_count = camera_data.people.calculate_objects()
@@ -154,13 +109,8 @@ def run_count():
             camera_name = camera['name']
             camera_id = camera['id']
             camera_url = camera['imageUrl']
-            print(camera_name)
-            known_parking = []
-            if all_cameras and all_cameras[camera_id]:
-                known_parking = all_cameras[camera_id].cars.knownParking
-                if known_parking:
-                    known_parking = known_parking
-            camera_data = get_camera_data(camera_name, camera_id, camera_url, known_parking)
+
+            camera_data = get_camera_data(camera_name, camera_id, camera_url)
             if camera_data:
                 if camera_id in all_cameras:
                     all_cameras[camera_id].people.recordsByTime.extend(camera_data.people.recordsByTime)
