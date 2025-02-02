@@ -59,7 +59,7 @@ def fetch_image(url):
 def get_all_objects(frame, types=[ObjectType.PERSON.value, ObjectType.CAR.value], cof=0.25,
                     iou=0.45) -> CameraData:
     """Detect and count people, and draw bounding boxes around them."""
-    results = model(frame, conf=cof, iou=iou, device='mps')  # Run detection on the frame
+    results = model(frame, conf=cof, iou=iou)  # Run detection on the frame
     # Loop over all detected boxes and count those that correspond to "person"
     camera_data = CameraData()
     start_time = int(time.time())

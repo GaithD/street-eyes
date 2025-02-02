@@ -215,9 +215,9 @@ def run_count():
             camera_name = camera['name']
             camera_id = camera['id']
             camera_url = camera['imageUrl']
-            # camera_id = '07b8616e-373e-4ec9-89cc-11cad7d59fcb'
+            camera_id = '07b8616e-373e-4ec9-89cc-11cad7d59fcb'
 
-            camera_id = "ac9ea7e9-4ab8-4188-be33-40266bcf9378"
+            # camera_id = "ac9ea7e9-4ab8-4188-be33-40266bcf9378"
 
             camera_url = f'https://webcams.nyctmc.org/api/cameras/{camera_id}/image'
 
@@ -267,7 +267,7 @@ def load_json_data():
     import json
     # Open and load the JSON file
     data = {}
-    with open("data1.json", "r") as file:
+    with open("data.json", "r") as file:
         try:
             data = json.load(file)
             if data:
@@ -282,7 +282,7 @@ def read_json_data():
     import json
     # Open and load the JSON file
     data = {}
-    with open("data1.json", "r") as file:
+    with open("data.json", "r") as file:
         try:
             data = json.load(file)
         except Exception as e:
@@ -293,7 +293,7 @@ def read_json_data():
 # def detect_parking(records, time_frame):
 
 
-def create_json(file_name="data1.json"):
+def create_json(file_name="data.json"):
     try:
         with open(file_name, 'x') as file:
             pass  # Do nothing; this leaves the file empty
@@ -302,7 +302,7 @@ def create_json(file_name="data1.json"):
 
 
 def save_json(all_data):
-    with open("data1.json", "w") as file:
+    with open("data.json", "w") as file:
         all_data = {key: data.to_dict() for key, data in all_data.items()}
         json.dump(all_data, file)
 
